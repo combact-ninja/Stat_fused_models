@@ -1,0 +1,65 @@
+def statistical_features(inputs):
+    mean = tf.reduce_mean(inputs, axis=[1, 2], keepdims=True)
+    std = tf.math.reduce_std(inputs, axis=[1, 2], keepdims=True)
+    max_val = tf.reduce_max(inputs, axis=[1, 2], keepdims=True)
+    min_val = tf.reduce_min(inputs, axis=[1, 2], keepdims=True)
+    return tf.concat([mean, std, max_val, min_val], axis=-1)
+
+
+def self_attention(inputs):
+    input_shape = tf.shape(inputs)
+    batch_size, height, width, channels = input_shape[0], input_shape[1], input_shape[2], input_shape[3]
+
+    # Reshape inputs to (batch_size, height*width, channels)
+    inputs_flat = tf.reshape(inputs, [batch_size, height * width, channels])
+
+    # Self-attention mechanism
+    query = Dense(channels)(inputs_flat)
+    key = Dense(channels)(inputs_flat)
+    value = Dense(channels)(inputs_flat)
+
+    # Calculate attention scores
+    attention_scores = tf.matmul(query, key, transpose_b=True)
+    attention_scores = attention_scores / tf.sqrt(tf.cast(channels, tf.float32))
+
+    # Apply softmax to get attention weights
+    attention_weights = tf.nn.softmax(attention_scores, axis=-1)
+
+    # Multiply the weights with the value tensor
+    attention_output = tf.matmul(attention_weights, value)
+
+    # Reshape back to original input shape
+    attention_output = tf.reshape(attention_output, [batch_size, height, width, channels])
+    return attention_output
+
+def statistical_fused_attention(inputs):
+    stats = statistical_features(inputs)
+    stats = Dense(inputs.shape[-1], activation='relu')(stats)
+    stats = Reshape((1, 1, inputs.shape[-1]))(stats)
+    stats_attention = Multiply()([inputs, stats])
+    self_attention_output = self_attention(inputs)
+    return Add()([stats_attention, self_attention_output])
+
+def build_model(input_shape):
+    inputs = Input(shape=input_shape)
+    x = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
+    x = MaxPooling2D((2, 2))(x)
+    x = statistical_fused_attention(x)
+    
+    x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    x = MaxPooling2D((2, 2))(x)
+    x = statistical_fused_attention(x)
+    
+    x = Flatten()(x)
+    x = Dense(128, activation='relu')(x)
+    outputs = Dense(10, activation='softmax')(x)  # Adjust the output layer according to your problem
+    
+    model = Model(inputs, outputs)
+    return model
+
+# Define input shape based on your data
+input_shape = (64, 64, 3)  # Example input shape (64x64 RGB image)
+model = build_model(input_shape)
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.summary()
