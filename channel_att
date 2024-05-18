@@ -1,0 +1,52 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models, Model, Input
+from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Flatten, GlobalAveragePooling2D, Multiply, Add, Reshape
+
+
+def statistical_features(inputs):
+    mean = tf.reduce_mean(inputs, axis=[1, 2], keepdims=True)
+    std = tf.math.reduce_std(inputs, axis=[1, 2], keepdims=True)
+    max_val = tf.reduce_max(inputs, axis=[1, 2], keepdims=True)
+    min_val = tf.reduce_min(inputs, axis=[1, 2], keepdims=True)
+    return tf.concat([mean, std, max_val, min_val], axis=-1)
+
+def attention_block(inputs):
+    channels = inputs.shape[-1]
+    avg_pool = GlobalAveragePooling2D()(inputs)
+    avg_pool = Reshape((1, 1, channels))(avg_pool)
+    dense1 = Dense(channels // 8, activation='relu')(avg_pool)
+    dense2 = Dense(channels, activation='sigmoid')(dense1)
+    return Multiply()([inputs, dense2])
+    
+def statistical_fused_attention(inputs):
+    stats = statistical_features(inputs)
+    stats = Dense(inputs.shape[-1], activation='relu')(stats)
+    stats = Reshape((1, 1, inputs.shape[-1]))(stats)
+    stats_attention = Multiply()([inputs, stats])
+    channel_attention = attention_block(inputs)
+    return Add()([stats_attention, channel_attention])
+
+def build_model(input_shape):
+    inputs = Input(shape=input_shape)
+    x = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
+    x = MaxPooling2D((2, 2))(x)
+    x = statistical_fused_attention(x)
+    
+    x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    x = MaxPooling2D((2, 2))(x)
+    x = statistical_fused_attention(x)
+    
+    x = Flatten()(x)
+    x = Dense(128, activation='relu')(x)
+    outputs = Dense(2, activation='softmax')(x)  # Adjust the output layer according to your problem
+    
+    model = Model(inputs, outputs)
+    return model
+
+# Define input shape based on your data
+input_shape = (64, 64, 3)  # Example input shape (64x64 RGB image)
+model = build_model(input_shape)
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.summary()
